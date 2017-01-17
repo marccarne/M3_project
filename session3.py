@@ -85,7 +85,7 @@ We will use INRIA's yael library
 Input: k, D, Train_descriptors
 Output: fisher, gmm
 """
-def compute_fisher_vectors(k, D, Train_descriptors):
+def compute_fisher_vectors(k, D, n_components):
 
 	print 'Computing gmm with '+str(k)+' centroids'
 	init=time.time()
@@ -93,10 +93,11 @@ def compute_fisher_vectors(k, D, Train_descriptors):
 	end=time.time()
 	print 'Done in '+str(end-init)+' secs.'
 
+	print 'Computing fisher vectors'
 	init=time.time()
-	fisher=np.zeros((len(Train_descriptors),k*128*2),dtype=np.float32)
+	fisher=np.zeros((len(Train_descriptors),k*n_components*2),dtype=np.float32)
 	for i in xrange(len(Train_descriptors)):
-		fisher[i,:]= ynumpy.fisher(gmm, Train_descriptors[i], include = ['mu','sigma'])
+		fisher[i,:]= ynumpy.fisher(gmm, np.float32(D), include = ['mu','sigma'])
 
 	end=time.time()
 	print 'Done in '+str(end-init)+' secs.'
@@ -124,12 +125,12 @@ def train_SVM(visual_words, train_labels):
 """
 Function: evaluate_test
 Description: get all the test data and predict their labels
-Input: clf, stdSl, test_images_filenames, pca
+Input: clf, stdSl, test_images_filenames, k, detector, gmm, n_components
 Output: accuracy
 """
-def evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm):
+def evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm, n_components):
 
-	fisher_test=np.zeros((len(test_images_filenames),k*128*2),dtype=np.float32)
+	fisher_test=np.zeros((len(test_images_filenames),k*n_components*2),dtype=np.float32)
 	for i in range(len(test_images_filenames)):
 		filename=test_images_filenames[i]
 		print 'Reading image '+filename
@@ -160,20 +161,20 @@ if __name__ == "__main__":
 	detector = cv2.SIFT(nfeatures=100)
 
 	# Apply PCA
-	# n_components = 32
-	# pca = PCA(n_components)
+	n_components = 32
+	pca = PCA(n_components)
 
 	# Extract train feactures
 	D, Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector)
 	
-	# pca.fit(D)
-	# D_pca = pca.transform(D)
+	D_pca = pca.fit(D).transform(D)
+	print 'D_pca shape: '+str(D_pca.shape)
 
 	# Define number of clusters
 	k = 32
 
 	# Compute fisher vectors
-	fisher, gmm = compute_fisher_vectors(k, D, Train_descriptors)
+	fisher, gmm = compute_fisher_vectors(k, D_pca, n_components)
 
 	# L2 normalization over the fisher vectors
 	# fisher_normL2 = normalize(x[:,np.newaxis], axis=0).ravel()
@@ -182,7 +183,7 @@ if __name__ == "__main__":
 	clf, stdSl = train_SVM(fisher, Train_label_per_descriptor)
 
 	# Evaluate test	
-	accuracy = evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm)
+	accuracy = evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm, n_components)
 
 	print 'Accuracy: '+str(accuracy)+'% k: '+str(k)
 
