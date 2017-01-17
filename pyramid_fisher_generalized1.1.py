@@ -1,5 +1,4 @@
 # coding: utf-8
-
 import cv2
 import numpy as np
 import cPickle
@@ -44,18 +43,28 @@ def read_data(train_files, train_labels, test_files, test_labels):
 # ### Extracció de característiques
 
 # In[19]:
-
+def create_D(Train_descriptors):    
+    size_descriptors=Train_descriptors[0].shape[1]
+    D=np.zeros((np.sum([len(p) for p in Train_descriptors]),size_descriptors),dtype=np.uint8)
+    startingpoint=0
+    for i in range(len(Train_descriptors)):
+        D[startingpoint:startingpoint+len(Train_descriptors[i])]=Train_descriptors[i]
+        startingpoint+=len(Train_descriptors[i])
+    
+    return D
+    
 def extract_image_features(train_images_filenames, train_labels, detector):
     return [(compute_feature(img, detector), label) for img,label in zip(train_images_filenames, train_labels)]
 
 
 # In[20]:
-
 def compute_feature(image_filename, detector):
 
     ima=cv2.imread(image_filename)
     gray=cv2.cvtColor(ima,cv2.COLOR_BGR2GRAY)
-    kpt,des=detector.detectAndCompute(gray,None)
+    dense=cv2.FeatureDetector_create("Dense")
+    kp=dense.detect(gray)
+    kp,des=detector.compute(gray,kp)
     new_image = image(des, kpt, gray.shape )
     
     return new_image
@@ -122,27 +131,25 @@ def Pyramid_Kernel(mat1, mat2, lvl = 2):
 
 # In[25]:
 
-def compute_codebook(codebook_name, Train_descriptors, k=512):
+def compute_fisher_vectors(k, D, Train_descriptors):
 
-    # Transform everything to numpy arrays
-    size_descriptors=Train_descriptors[0].shape[1]
-    D=np.zeros((np.sum([len(p) for p in Train_descriptors]),size_descriptors),dtype=np.uint8)
-    startingpoint=0
-    for i in range(len(Train_descriptors)):
-        D[startingpoint:startingpoint+len(Train_descriptors[i])]=Train_descriptors[i]
-        startingpoint+=len(Train_descriptors[i])
-        
-    print 'Computing kmeans with '+str(k)+' centroids'
+    print 'Computing gmm with '+str(k)+' centroids'
     init=time.time()
-    codebook = cluster.MiniBatchKMeans(n_clusters=k, verbose=False, batch_size=k * 20,compute_labels=False,reassignment_ratio=10**-4)
-    codebook.fit(D)
-    cPickle.dump(codebook, open(codebook_name, "wb"))
+    gmm = ynumpy.gmm_learn(np.float32(D), k)
     end=time.time()
     print 'Done in '+str(end-init)+' secs.'
-    return codebook
 
+    init=time.time()
+    fisher=np.zeros((len(Train_descriptors),k*128*2),dtype=np.float32)
+    for i in xrange(len(Train_descriptors)):
+        fisher[i,:]= ynumpy.fisher(gmm, Train_descriptors[i], include = ['mu','sigma'])
 
-# ### Bow
+    end=time.time()
+    print 'Done in '+str(end-init)+' secs.'
+
+    return fisher,gmm
+
+# ### Fisher
 
 # In[26]:
 
@@ -283,9 +290,16 @@ if __name__ == "__main__":
     Train_info = extract_image_features(train_images_filenames, train_labels, detector)
     Test_info = extract_image_features(test_images_filenames, test_labels, detector)
 
+    D = create_D(Train_info.des)
     #as default k=512
-    print "computing codebook"
-    codebook = compute_codebook("codebook_pyramid_2.dat", [img[0].des for img in Train_info], k = 20)
+    # Compute fisher vectors
+    
+    k = 20
+    
+    fisher,gmm = compute_fisher_vectors(k=20, D, Train_info.des)    
+    
+    #print "computing codebook"
+    #codebook = compute_codebook("codebook_pyramid_2.dat", [img[0].des for img in Train_info], k = 20)
     x_part=2
     y_part=2
  
@@ -298,10 +312,10 @@ if __name__ == "__main__":
 
     #accuracy = evaluate_test_Kernel(test_images_filenames, test_labels, codebook, stdSlr,D_scaled)
     print "testing!"
-    accuracy = evaluate_pyramid(Test_info, codebook, stdSlr,D_scaled)
+    accuracy = evaluate_pyramid(Test_info, fisher, stdSlr,D_scaled)
     print 'Final accuracy: ' + str(accuracy)
     
-    k = 20
+    
     out = 'Accuracy:'+str(accuracy)+' k: '+str(k)+'. \n'
     fo = open('accuracies.txt' ,'a')
     fo.write(out)
@@ -311,5 +325,6 @@ if __name__ == "__main__":
     print 'Done in '+str(end-start)+' secs.'
 
     ## 49.56% in 285 secs.
+
 
 
