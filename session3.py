@@ -8,6 +8,8 @@ from sklearn import svm
 from sklearn import cluster
 from yael import ynumpy
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import normalize
+
 
 """
 Function: read_data
@@ -65,7 +67,7 @@ Output: kp,des
 """
 def compute_dense(image_filename, detector):
 
-    print 'Reading image '+ image_filename
+    print 'Reading image '+ str(image_filename)	
     ima=cv2.imread(image_filename)
     gray=cv2.cvtColor(ima,cv2.COLOR_BGR2GRAY)
 			
@@ -81,7 +83,7 @@ Function: compute_fisher_vectors
 Description: compute fisher vectors
 We will use INRIA's yael library
 Input: k, D, Train_descriptors
-Output: fisher
+Output: fisher, gmm
 """
 def compute_fisher_vectors(k, D, Train_descriptors):
 
@@ -99,7 +101,7 @@ def compute_fisher_vectors(k, D, Train_descriptors):
 	end=time.time()
 	print 'Done in '+str(end-init)+' secs.'
 
-	return fisher
+	return (fisher, gmm)
 
 
 """
@@ -125,20 +127,16 @@ Description: get all the test data and predict their labels
 Input: clf, stdSl, test_images_filenames, pca
 Output: accuracy
 """
-def evaluate_test(clf, stdSl, test_images_filenames, pca):
+def evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm):
 
 	fisher_test=np.zeros((len(test_images_filenames),k*128*2),dtype=np.float32)
 	for i in range(len(test_images_filenames)):
 		filename=test_images_filenames[i]
 		print 'Reading image '+filename
-		ima=cv2.imread(filename)
-		gray=cv2.cvtColor(ima,cv2.COLOR_BGR2GRAY)
-		#kpt,des=SIFTdetector.detectAndCompute(gray,None)
-		kpt, des = compute_dense(gray, None)
-		des_pca = pca.transform(des)
-		fisher_test[i,:]=ynumpy.fisher(gmm, des_pca, include = ['mu','sigma'])
+		kpt,des= compute_dense(test_images_filenames[i], detector) 
+		fisher_test[i,:]=ynumpy.fisher(gmm, des, include = ['mu','sigma'])
 
-	accuracy = 100*clf.score(stdSlr.transform(fisher_test), test_labels)
+	accuracy = 100*clf.score(stdSl.transform(fisher_test), test_labels)
 
 	return accuracy
 
@@ -162,26 +160,29 @@ if __name__ == "__main__":
 	detector = cv2.SIFT(nfeatures=100)
 
 	# Apply PCA
-	n_components = 32
-	pca = PCA(n_components)
+	# n_components = 32
+	# pca = PCA(n_components)
 
 	# Extract train feactures
 	D, Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector)
 	
-	pca.fit(D)
-	D_pca = pca.transform(D)
+	# pca.fit(D)
+	# D_pca = pca.transform(D)
 
 	# Define number of clusters
 	k = 32
 
 	# Compute fisher vectors
-	fisher = compute_fisher_vectors(k, D_pca, Train_descriptors)
+	fisher, gmm = compute_fisher_vectors(k, D, Train_descriptors)
+
+	# L2 normalization over the fisher vectors
+	# fisher_normL2 = normalize(x[:,np.newaxis], axis=0).ravel()
 
 	# Train a linear SVM classifier
 	clf, stdSl = train_SVM(fisher, Train_label_per_descriptor)
 
 	# Evaluate test	
-	accuracy = evalute_test(clf, stdSl, test_images_filenames, pca)
+	accuracy = evaluate_test(clf, stdSl, test_images_filenames, k, detector, gmm)
 
 	print 'Accuracy: '+str(accuracy)+'% k: '+str(k)
 
