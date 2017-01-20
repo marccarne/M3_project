@@ -43,15 +43,41 @@ def read_data(train_files, train_labels, test_files, test_labels):
 # ### Extracció de característiques
 
 # In[19]:
-def create_D(Train_descriptors):    
+def extract_train_features(train_images_filenames, train_labels, detector):
+
+    Train_descriptors = []
+    Train_label_per_descriptor = []
+
+    # Extract SIFT keypoints and descriptors
+    for i in range(len(train_images_filenames)):
+        # Compute DENSE SIFT
+        kpt,des= compute_dense(train_images_filenames[i], detector) 		
+        Train_descriptors.append(des)
+        Train_label_per_descriptor.append(train_labels[i])
+        print str(len(kpt))+' extracted keypoints and descriptors'
+
     size_descriptors=Train_descriptors[0].shape[1]
     D=np.zeros((np.sum([len(p) for p in Train_descriptors]),size_descriptors),dtype=np.uint8)
     startingpoint=0
     for i in range(len(Train_descriptors)):
         D[startingpoint:startingpoint+len(Train_descriptors[i])]=Train_descriptors[i]
         startingpoint+=len(Train_descriptors[i])
+
+    return (D, Train_descriptors, Train_label_per_descriptor)
+
+def compute_dense(image_filename, detector):
+
+    print 'Reading image '+ str(image_filename)	
+    ima=cv2.imread(image_filename)
+    gray=cv2.cvtColor(ima,cv2.COLOR_BGR2GRAY)
     
-    return D
+    dense=cv2.FeatureDetector_create("Dense")
+    kp=dense.detect(gray)
+    kp,des=detector.compute(gray,kp)
+    
+    return kp,des
+    
+
     
 def extract_image_features(train_images_filenames, train_labels, detector):
     return [(compute_feature(img, detector), label) for img,label in zip(train_images_filenames, train_labels)]
@@ -65,7 +91,7 @@ def compute_feature(image_filename, detector):
     dense=cv2.FeatureDetector_create("Dense")
     kp=dense.detect(gray)
     kp,des=detector.compute(gray,kp)
-    new_image = image(des, kpt, gray.shape )
+    new_image = image(des, kp, gray.shape )
     
     return new_image
 
@@ -131,7 +157,7 @@ def Pyramid_Kernel(mat1, mat2, lvl = 2):
 
 # In[25]:
 
-def compute_fisher_vectors(k, D, Train_descriptors):
+def compute_fisher_vectors(D, n_components, k):
 
     print 'Computing gmm with '+str(k)+' centroids'
     init=time.time()
@@ -140,25 +166,25 @@ def compute_fisher_vectors(k, D, Train_descriptors):
     print 'Done in '+str(end-init)+' secs.'
 
     init=time.time()
-    fisher=np.zeros((len(Train_descriptors),k*128*2),dtype=np.float32)
+    fisher=np.zeros((len(Train_descriptors),k*n_components*2),dtype=np.float32)
     for i in xrange(len(Train_descriptors)):
-        fisher[i,:]= ynumpy.fisher(gmm, Train_descriptors[i], include = ['mu','sigma'])
+        fisher[i,:]= ynumpy.fisher(gmm, np.float32(D), include = ['mu','sigma'])
 
     end=time.time()
     print 'Done in '+str(end-init)+' secs.'
 
-    return fisher,gmm
-
+    return (fisher, gmm)
+ 
 # ### Fisher
 
 # In[26]:
 
 def Pyramid_BoW_fisher(gmm, Image_info, x_part, y_part):
     
-    k = codebook.cluster_centers_.shape[0]
+    k = gmm.shape[0]
     # Dimensió de cada vector = k* nº cel·les, en aquest cas 21 (16 peques, 4 qadrants i la sencera)
     visual_words=[]
-    i = 0
+    #i = 0
     for img,label in Image_info:
 
         total_rows = x_part ** 2
@@ -167,9 +193,8 @@ def Pyramid_BoW_fisher(gmm, Image_info, x_part, y_part):
         x_step = img.shape[0]/total_rows
         y_step = img.shape[1]/total_columns
 
-        Q = [total_rows][total_columns]
-        Q_int = [x_part][y_part]
-
+        Q = [[0 for x in xrange(total_rows)] for y in xrange(total_columns)]
+        Q_int = [[0 for w in xrange(x_part)] for z in xrange(y_part)]
         #classifiquem els descriptors segons les coordenades del kp al qual pertanyen
         for kpt, desc in zip(img.kpt, img.des):
 
@@ -186,23 +211,23 @@ def Pyramid_BoW_fisher(gmm, Image_info, x_part, y_part):
         for row in xrange(x_part):
             for column in xrange(y_part):
                 for sub_r in xrange(x_part):
-                    for sub_c in xrange(y_range):
-                        Q_int[row][column] = np.array(Q[row][column] + Q[row*x_part+sub_r][column*y_part+sub_c])
+                    for sub_c in xrange(y_part):
+                        Q_int[row][column] = np.array(Q[row*x_part+sub_r][column*y_part+sub_c])
                 #Q_int[row][column] = np.array(Q[row*x_part:row*x_part+(x_part),column*y_part:column*y_part+(y_part)])
 
         #Per comoditat, formem una llista amb tots els descriptors classificats
         #Q = [img.des, Q1, Q2, Q3, Q4, np.array(Q11), np.array(Q12), np.array(Q13), np.array(Q14), np.array(Q21), np.array(Q22), np.array(Q23), np.array(Q24), np.array(Q31), np.array(Q32), np.array(Q33), np.array(Q34), np.array(Q41), np.array(Q42), np.array(Q43), np.array(Q44)]
 
         des_array = []
-        des_array.append(img.des)
+        des_array.append(0.25* np.array(img.des))
 
         for arr_r in xrange(x_part):
             for arr_c in xrange(y_part):
-                des_array.append(Q_int[arr_r][arr_c])
+                des_array.append(0.25*np.array(Q_int[arr_r][arr_c]))
 
         for arr_r in xrange(total_rows):
             for arr_c in xrange(total_columns):
-                des_array.append(Q[arr_r][arr_c])
+                des_array.append(0.5*np.array(Q[arr_r][arr_c]))
 
 
         #Iniciem el descriptor piramidal
@@ -241,29 +266,12 @@ def train_SVM_pyramid(visual_words, train_labels, toStore= False, filename = "")
 
 # ### Eval
 
-# In[28]:
-
-def evaluate_test_Kernel(test_images_filenames, test_labels, codebook, stdSlr, D_scaled):
-    k = codebook.cluster_centers_.shape[0]
-    # get all the test data and predict their labels
-    visual_words_test=np.zeros((len(test_images_filenames), k),dtype=np.float32)
-    for i in range(len(test_images_filenames)):
-        #extract features for a single image
-        kpt,des= compute_feature(test_images_filenames[i], detector)
-        #extract VW for a single image
-        words=codebook.predict(des)
-        visual_words_test[i,:]=np.bincount(words,minlength=k)
-    
-    predictMatrix = intersection_Kernel(stdSlr.transform(visual_words_test), D_scaled)
-
-    return 100*clf.score(predictMatrix, test_labels)
-
 
 # In[35]:
 
 def evaluate_pyramid(test_info, codebook, stdSlr, D_scaled):
     
-    visual_words_test = np.array(Pyramid_BoW_fisher(gmm, Image_info, x_part, y_part))
+    visual_words_test = np.array(Pyramid_BoW_fisher(gmm, test_info, x_part, y_part))
     
     predictMatrix = Pyramid_Kernel(stdSlr.transform(visual_words_test), D_scaled)
 
@@ -290,13 +298,18 @@ if __name__ == "__main__":
     Train_info = extract_image_features(train_images_filenames, train_labels, detector)
     Test_info = extract_image_features(test_images_filenames, test_labels, detector)
 
-    D = create_D(Train_info.des)
+    D, Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector)
     #as default k=512
     # Compute fisher vectors
+    n_components = 32
+    pca = PCA(n_components)
     
-    k = 20
+    D_pca = pca.fit(D).transform(D)
+    print 'D_pca shape: '+str(D_pca.shape)
     
-    fisher,gmm = compute_fisher_vectors(k=20, D, Train_info.des)    
+    k = 32
+    
+    fisher, gmm = compute_fisher_vectors(D_pca, n_components,k)
     
     #print "computing codebook"
     #codebook = compute_codebook("codebook_pyramid_2.dat", [img[0].des for img in Train_info], k = 20)
@@ -304,7 +317,7 @@ if __name__ == "__main__":
     y_part=2
  
     print "computing train VW"
-    visual_words = Pyramid_BoW_fisher(gmm, Image_info, x_part, y_part)
+    visual_words = Pyramid_BoW_fisher(gmm, Train_info, x_part, y_part)
 
     # Train a linear SVM classifier
     print "computing SVM"
