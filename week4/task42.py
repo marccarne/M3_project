@@ -1,8 +1,9 @@
+# Import libraries
+
 # Set path of site-packages to find OpenCV libraries
 import sys
 sys.path.append('/usr/local/lib/python2.7/site-packages')
 
-# Import libraries
 import cv2
 import numpy as np
 import cPickle
@@ -26,14 +27,14 @@ Input: model, layer_name
 Output: model
 """
 def lod_model(model, layer_name):
-        
-	# Load VGG model
-        base_model = VGG16(weights=model)
-        
-	# Visalize topology in an image
-        # Crop the model up to a certain layer
-        model = Model(input=base_model.input, output=base_model.get_layer(layer_name).output)
-        return model
+
+    # Load VGG model
+    base_model = VGG16(weights=model)
+    
+    # Visalize topology in an image
+    # Crop the model up to a certain layer
+    model = Model(input=base_model.input, output=base_model.get_layer(layer_name).output)
+    return model
 
 
 """
@@ -62,7 +63,7 @@ Input: train_images_filenames, train_labels, detector
 Output: Train_descriptors, Train_label_per_descriptor
 """
 def extract_train_features(train_images_filenames, train_labels, detector):
-        
+
     Train_descriptors = []
     Train_label_per_descriptor = []
 
@@ -87,10 +88,10 @@ def compute_codebook(codebook_name, Train_descriptors, k=512):
     D=np.zeros(((len(Train_descriptors[0])*len(Train_descriptors)),size_descriptors),dtype=np.uint8)
     startingpoint=0
     for i in range(len(Train_descriptors)):
-	for j in range(len(Train_descriptors[i])):
-        	D[startingpoint:startingpoint+len(Train_descriptors[i][j])]=Train_descriptors[i][j]
-        	startingpoint+=len(Train_descriptors[i][j])
-        
+        for j in range(len(Train_descriptors[i])):
+            D[startingpoint:startingpoint+len(Train_descriptors[i][j])]=Train_descriptors[i][j]
+            startingpoint+=len(Train_descriptors[i][j])
+
     print 'Computing kmeans with '+str(k)+' centroids'
     init=time.time()
     codebook = cluster.MiniBatchKMeans(n_clusters=k, verbose=False, batch_size=k * 20,compute_labels=False,reassignment_ratio=10**-4)
@@ -108,11 +109,12 @@ Input: codebook, descriptors
 Output: visual_words
 """
 def BoW(codebook, descriptors):
-    
+    #cluster_centers_ : array, [n_clusters, n_features]
     init=time.time()
+    #visual_words=np.zeros((len(descriptors),k),dtype=np.float32)
     k = codebook.cluster_centers_.shape[0]
+    print k
     visual_words=np.zeros((len(descriptors),k),dtype=np.float32)
-    
     for i in xrange(len(descriptors)):
         words=codebook.predict(descriptors[i])
         visual_words[i,:]=np.bincount(words,minlength=k)
@@ -165,10 +167,9 @@ def compute_feature(image_filename, detector):
 
     des = []
     for kp in kpt:
-	kp=kp.pt
-	des.append(features[kp[1],kp[0],:])
+        kp=kp.pt
+        des.append(features[kp[1],kp[0],:])
     return (kpt, des)
- 
 
 """
 Function: evaluate_test
@@ -177,15 +178,13 @@ Input: test_images_filenames, test_labels, codebook, stdSlr, detector, clf
 Output: accuracy
 """   
 def evaluate_test(test_images_filenames, test_labels, codebook, stdSlr, detector, clf):
-    
     k = codebook.cluster_centers_.shape[0]
-    # Get all the test data and predict their labels
+    # get all the test data and predict their labels
     visual_words_test=np.zeros((len(test_images_filenames), k),dtype=np.float32)
-    
     for i in range(len(test_images_filenames)):
-        # Extract features for a single image
+        #extract features for a single image
         kpt,des= compute_feature(test_images_filenames[i], detector)
-        # Extract VW for a single image
+        #extract VW for a single image
         words=codebook.predict(des)
         visual_words_test[i,:]=np.bincount(words,minlength=k)
           
@@ -218,7 +217,7 @@ def core(k):
     Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector)
     
     # Compute coodebook
-    codebook = compute_codebook("codebook_41.dat", Train_descriptors, k=k)
+    codebook = compute_codebook("codebook_42.dat", Train_descriptors, k=k)
     
     # Compute bag of words
     visual_words = BoW(codebook, Train_descriptors)
@@ -240,18 +239,17 @@ def core(k):
     
     return
 
-
 #----------------------------------------------------#    
 #------------------ Main function ------------------ #
 #----------------------------------------------------#
 if __name__ == "__main__":
 
     # Define array of k sizes
-    cbook_size_k = np.arange(64,2000,64)
+    cbook_size_k = np.arange(64,128,64)
 
     # Compute core 
     for i in range(len(cbook_size_k)):
-	print '\nComputing core: cbook_size = '+str(cbook_size_k[i])+', iteration = '+str(i)  
-	core(cbook_size_k[i]) 
+        print '\nComputing core: cbook_size = '+str(cbook_size_k[i])+', iteration = '+str(i)  
+        core(cbook_size_k[i]) 
         
     print 'Overall finished'

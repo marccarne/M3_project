@@ -1,39 +1,48 @@
+# Set path of site-packages to find OpenCV libraries
+import sys
+sys.path.append('/usr/local/lib/python2.7/site-packages')
+
 # Import libraries
 import cv2
 import numpy as np
 import cPickle
 import time
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn import svm
 from sklearn.decomposition import PCA
-
 from keras.applications.vgg16 import VGG16
 from keras.preprocessing import image
 from keras.applications.vgg19 import preprocess_input
 from keras.models import Model
 from keras import backend as K
 from keras.utils.visualize_util import plot
-import matplotlib.pyplot as plt
 
 
-# Function: train_features()
-# Description:
-# Input: train_images_filenames, train_labels, extractor, n_images, isPCA=True
-# Output: D, L
-def lod_model(model, layer_name):
-	#load VGG model
+"""
+Function: load_model
+Description: load model
+Input: model, layer_name
+Output: model
+"""
+def load_model(model, layer_name):
+	
+  	# Load VGG model
 	base_model = VGG16(weights=model)
-	#visalize topology in an image
-	#crop the model up to a certain layer
+	
+	# Viusalize topology in an image
+	# Crop the model up to a certain layer
 	model = Model(input=base_model.input, output=base_model.get_layer(layer_name).output)
 	return model
 
-def train_features(images_filenames, labels, textractor, n_images, is_pca):
 
-    # SIFTdetector = cv2.SIFT(nfeatures=n_Sift_Features)
-    # read the just 30 train images per class
-    # extract SIFT keypoints and descriptors
-    # store descriptors in a python list of numpy arrays
+"""
+Function: extract_train_features
+Description: extract train features
+Input: images_filenames, labels, textractor, n_images, is_pca
+Output: d, l
+"""
+def extract_train_features(images_filenames, labels, textractor, n_images, is_pca):
 
     train_descriptors = []
     train_label_per_descriptor = []
@@ -63,26 +72,34 @@ def train_features(images_filenames, labels, textractor, n_images, is_pca):
         pca.fit(d)
         dtrfm = pca.transform(d)
 	d = dtrfm
-    return d, l
+    return (d, l)
 
-# Function: train_SVM()
-# Description:
-# Input: d_scaled, l, kernel_type
-# Output: clf
+
+"""
+Function: train_svm
+Description: train svm
+Input: d_scaled, l, kernel_type
+Output: clf_train
+"""
 def train_svm(d_scaled, l, kernel_type):
+    
     print 'Training the SVM classifier...'
     clf_train = svm.SVC(kernel=kernel_type, C=100).fit(d_scaled, l)
     print 'Done!'
     return clf_train
 
 
-# Function: test_classifier()
-# Description:
-# Input: images_filenames, labels, extractor, clf, stdSlr, pca, isPCA=True
-# Output: numcorrect
-def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca,):
-    numtestimages = 0
+"""
+Function: test_classifier
+Description: test classifier
+Input: images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca
+Output: numcorrect
+"""
+def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca):
+    
+    numtestimages = np.arange(10,105,5)
     cnumcorrect = 0
+    
     for i in range(len(images_filenames)):
         filename = images_filenames[i]
         img = image.load_img(filename, target_size=(224, 224))
@@ -100,14 +117,21 @@ def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca
         predictedclass = values[np.argmax(counts)]
         print 'image ' + filename + ' was from class ' + labels[i] + ' and was predicted ' + predictedclass
         numtestimages += 1
-        if predictedclass == labels[i]:
+        
+	if predictedclass == labels[i]:
             cnumcorrect += 1
+    
     return cnumcorrect
 
 
-# ------------------ Main function ------------------ #
-if __name__ == "__main__":
-
+"""
+Function: core
+Description: system core
+Input: num_images
+Output: 
+"""
+def core(num_images):
+	
 	# Start timer to analyse performance
 	start = time.time()
 
@@ -123,12 +147,12 @@ if __name__ == "__main__":
 	# PCA components
 	pca = PCA(n_components=20)
 
-	# Create the SIFT detector object
-	extractor = lod_model('imagenet','fc2')
+	# Crop the model up to a last FC layer
+	extractor = load_model('imagenet','fc2')
 
-	num_images = 15
+	# Extract train features
 	apply_pca = False
-	D, L = train_features(train_images_filenames, train_labels, extractor, num_images, apply_pca)
+	D, L = extract_train_features(train_images_filenames, train_labels, extractor, num_images, apply_pca)
 
 	# Train a linear SVM classifier
 	stdSlr = StandardScaler().fit(D)
@@ -142,8 +166,30 @@ if __name__ == "__main__":
 	# Get all the test data and predict their labels
 	numcorrect = classifier(test_images_filenames, test_labels, extractor, clf, stdSlr, apply_pca, pca)
 
-	print 'Final accuracy: ' + str(numcorrect * 100.0 / len(test_images_filenames))
+	# Calculate accuracy
+	accuracy = str(numcorrect * 100.0 / len(test_images_filenames))
+	out = 'Accuracy: '+str(accuracy)+', num images used to train: '+str(num_images)+'\n'
+    	fo = open('accuracies_3.txt' ,'a')
+    	fo.write(out)
+    	fo.close()
 
 	# End timer to print time spent
 	end = time.time()
 	print 'Done in ' + str(end - start) + ' secs.'
+
+	return
+
+#-----------------------------------------------------#
+#------------------- Main function -------------------#
+#-----------------------------------------------------#
+if __name__ == "__main__":
+   
+    # Define array of number of images
+    num_images = np.arange(50,1881,50)
+
+    # Compute core 
+    for i in range(len(num_images)):
+	print '\nComputing core: number of images = '+str(num_images)+', iteration = '+str(i)  
+	core(num_images[i]) 
+        
+    print 'Overall finished'

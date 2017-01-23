@@ -12,7 +12,7 @@ from sklearn.decomposition import PCA
 # Description:
 # Input: train_images_filenames, train_labels, extractor, n_images, isPCA=True
 # Output: D, L
-def train_features(images_filenames, labels, textractor, n_images, is_pca):
+def train_features(images_filenames, labels, textractor, n_images, is_pca, pca):
 
     # SIFTdetector = cv2.SIFT(nfeatures=n_Sift_Features)
     # read the just 30 train images per class
@@ -44,7 +44,7 @@ def train_features(images_filenames, labels, textractor, n_images, is_pca):
         print "Apply PCA algorithm to reduce dimensionality"
         pca.fit(d)
         dtrfm = pca.transform(d)
-    return dtrfm, l
+    return dtrfm, l, train_descriptors
 
 # Function: train_SVM()
 # Description:
@@ -61,7 +61,7 @@ def train_svm(d_scaled, l, kernel_type):
 # Description:
 # Input: images_filenames, labels, extractor, clf, stdSlr, pca, isPCA=True
 # Output: numcorrect
-def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca,):
+def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca):
     numtestimages = 0
     cnumcorrect = 0
     for i in range(len(images_filenames)):
@@ -73,7 +73,7 @@ def classifier(images_filenames, labels, cextractor, cclf, cstdslr, is_pca, cpca
         if is_pca:
             dtrfm = cpca.transform(des)
 
-        predictions = cclf.predict(cstdslr.transform(des))
+        predictions = cclf.predict(cstdslr.transform(dtrfm))
         values, counts = np.unique(predictions, return_counts=True)
         predictedclass = values[np.argmax(counts)]
         print 'image ' + filename + ' was from class ' + labels[i] + ' and was predicted ' + predictedclass
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     num_images = 15
     apply_pca = True
-    D, L = train_features(train_images_filenames, train_labels, extractor, num_images, apply_pca)
+    D, L , train_descriptors= train_features(train_images_filenames, train_labels, extractor, num_images, apply_pca, pca)
 
     # Train a linear SVM classifier
     stdSlr = StandardScaler().fit(D)

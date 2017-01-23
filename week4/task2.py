@@ -35,11 +35,11 @@ for layers in block_layer:
 
 	# Get the features from images
 	features = model.predict(x)
-	print 'Features shape: '+features.shape
+	print 'Features shape: '+str(features.shape)
 
 	# Remove first dimension
 	output = features.reshape(features.shape[1:])
-	print 'Output shape after first dimension removed: '+output.shape
+	print 'Output shape after first dimension removed: '+str(output.shape)
 
  	# Initialize feature map
 	feature_map = np.empty((output.shape[0],output.shape[1]))

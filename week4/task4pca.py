@@ -1,8 +1,9 @@
+# Import libraries
+
 # Set path of site-packages to find OpenCV libraries
 import sys
 sys.path.append('/usr/local/lib/python2.7/site-packages')
 
-# Import libraries
 import cv2
 import numpy as np
 import cPickle
@@ -17,7 +18,7 @@ from keras.models import Model
 from keras import backend as K
 from keras.utils.visualize_util import plot
 import matplotlib.pyplot as plt
-
+from sklearn.decomposition import PCA
 
 """
 Function: load_model
@@ -26,14 +27,14 @@ Input: model, layer_name
 Output: model
 """
 def lod_model(model, layer_name):
-        
-	# Load VGG model
-        base_model = VGG16(weights=model)
-        
-	# Visalize topology in an image
-        # Crop the model up to a certain layer
-        model = Model(input=base_model.input, output=base_model.get_layer(layer_name).output)
-        return model
+    
+    # Load VGG model
+    base_model = VGG16(weights=model)
+    
+    # Visalize topology in an image
+    # Crop the model up to a certain layer
+    model = Model(input=base_model.input, output=base_model.get_layer(layer_name).output)
+    return model
 
 
 """
@@ -61,7 +62,7 @@ Description: read the train and test files
 Input: train_images_filenames, train_labels, detector
 Output: Train_descriptors, Train_label_per_descriptor
 """
-def extract_train_features(train_images_filenames, train_labels, detector):
+def extract_train_features(train_images_filenames, train_labels, detector, apply_pca, pca):
         
     Train_descriptors = []
     Train_label_per_descriptor = []
@@ -70,8 +71,35 @@ def extract_train_features(train_images_filenames, train_labels, detector):
         kpt,des= compute_feature(train_images_filenames[i], detector) 
         Train_descriptors.append(des)
         Train_label_per_descriptor.append(train_labels[i])
+    
+    if apply_pca:
+        print 'Applying pca to descriptors'
+        Train_descriptors,Train_label_per_descriptor = pca_app(Train_descriptors,Train_label_per_descriptor)
+    
+    return (Train_descriptors,Train_label_per_descriptor)
 
-    return (Train_descriptors, Train_label_per_descriptor)
+"""
+Function: apply pca
+Description: use pca to lower dimensionality of train descriptors
+Input: Train_descriptors,Train_label_per_descriptor
+Output: d,l
+"""
+
+def pca_app(Train_descriptors,Train_label_per_descriptor):
+
+    d = Train_descriptors[0]
+    l = np.array([Train_label_per_descriptor[0]] * len(Train_descriptors[0]))
+
+    for i in range(1, len(Train_descriptors)):
+        d = np.vstack((d, Train_descriptors[i]))
+        l = np.hstack((l, np.array([Train_label_per_descriptor[i]] * len(Train_descriptors[i]))))
+        #print 'Level '+str(i)+' completed'
+    print 'fitting pca, d:'+str(d.shape)
+    pca.fit(d)
+    print 'd fitted'
+    d = pca.transform(d)
+
+    return (d,l)
 
 
 """
@@ -83,18 +111,18 @@ Output: codebook
 def compute_codebook(codebook_name, Train_descriptors, k=512):
 
     # Transform everything to numpy arrays
-    size_descriptors=len(Train_descriptors[0][1])
-    D=np.zeros(((len(Train_descriptors[0])*len(Train_descriptors)),size_descriptors),dtype=np.uint8)
-    startingpoint=0
-    for i in range(len(Train_descriptors)):
-	for j in range(len(Train_descriptors[i])):
-        	D[startingpoint:startingpoint+len(Train_descriptors[i][j])]=Train_descriptors[i][j]
-        	startingpoint+=len(Train_descriptors[i][j])
+    #size_descriptors=len(Train_descriptors[0][1])
+    #D=np.zeros(((len(Train_descriptors[0])*len(Train_descriptors)),size_descriptors),dtype=np.uint8)
+    #startingpoint=0
+    #for i in range(len(Train_descriptors)):
+    #    for j in range(len(Train_descriptors[i])):
+    #        D[startingpoint:startingpoint+len(Train_descriptors[i][j])]=Train_descriptors[i][j]
+    #        startingpoint+=len(Train_descriptors[i][j])
         
     print 'Computing kmeans with '+str(k)+' centroids'
     init=time.time()
     codebook = cluster.MiniBatchKMeans(n_clusters=k, verbose=False, batch_size=k * 20,compute_labels=False,reassignment_ratio=10**-4)
-    codebook.fit(D)
+    codebook.fit(Train_descriptors)
     cPickle.dump(codebook, open(codebook_name, "wb"))
     end=time.time()
     print 'Done in '+str(end-init)+' secs.'
@@ -107,13 +135,14 @@ Description: bag of words
 Input: codebook, descriptors
 Output: visual_words
 """
-def BoW(codebook, descriptors):
-    
+def BoW(codebook, descriptors, train_image_filenames):
+    #cluster_centers_ : array, [n_clusters, n_features]
     init=time.time()
+    #visual_words=np.zeros((len(descriptors),k),dtype=np.float32)
     k = codebook.cluster_centers_.shape[0]
-    visual_words=np.zeros((len(descriptors),k),dtype=np.float32)
-    
-    for i in xrange(len(descriptors)):
+    print k
+    visual_words=np.zeros((len(train_image_filenames),k),dtype=np.float32)
+    for i in xrange(len(train_image_filenames)):
         words=codebook.predict(descriptors[i])
         visual_words[i,:]=np.bincount(words,minlength=k)
 
@@ -165,8 +194,8 @@ def compute_feature(image_filename, detector):
 
     des = []
     for kp in kpt:
-	kp=kp.pt
-	des.append(features[kp[1],kp[0],:])
+        kp=kp.pt
+        des.append(features[kp[1],kp[0],:])
     return (kpt, des)
  
 
@@ -176,21 +205,22 @@ Description: evaluate test
 Input: test_images_filenames, test_labels, codebook, stdSlr, detector, clf
 Output: accuracy
 """   
-def evaluate_test(test_images_filenames, test_labels, codebook, stdSlr, detector, clf):
-    
+def evaluate_test(test_images_filenames, test_labels, codebook, stdSlr, detector, clf, apply_pca, cpca):
     k = codebook.cluster_centers_.shape[0]
-    # Get all the test data and predict their labels
+    # get all the test data and predict their labels
     visual_words_test=np.zeros((len(test_images_filenames), k),dtype=np.float32)
-    
     for i in range(len(test_images_filenames)):
-        # Extract features for a single image
+        #extract features for a single image
         kpt,des= compute_feature(test_images_filenames[i], detector)
-        # Extract VW for a single image
+        if apply_pca:
+            print 'Applying pca to test descriptors'
+            des = cpca.transform(des)
+        #extract VW for a single image
         words=codebook.predict(des)
         visual_words_test[i,:]=np.bincount(words,minlength=k)
+    
           
     return 100*clf.score(stdSlr.transform(visual_words_test), test_labels)
-
 
 """
 Function: core
@@ -198,7 +228,7 @@ Description: system core
 Input: k
 Output: 
 """ 
-def core(k):
+def core(k,pca):
 
     start = time.time()
     
@@ -214,32 +244,34 @@ def core(k):
     # Create detector loading model imagenet at one layer 
     detector = lod_model('imagenet', 'block3_conv3')
     
+    apply_pca = True
+
     # Extract train features
-    Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector)
-    
+    Train_descriptors, Train_label_per_descriptor = extract_train_features(train_images_filenames, train_labels, detector, apply_pca, pca)
+    print 'Size of train_descriptors: '+str(Train_descriptors.shape)    
     # Compute coodebook
-    codebook = compute_codebook("codebook_41.dat", Train_descriptors, k=k)
+    codebook = compute_codebook("codebook_4pca.dat", Train_descriptors, k=k)
     
     # Compute bag of words
-    visual_words = BoW(codebook, Train_descriptors)
-    
-    # Train a linear SVM classifier
-    clf, stdSlr = train_SVM(visual_words, train_labels)
+    visual_words = BoW(codebook, Train_descriptors,train_images_filenames)
+    print 'size of train labels'+str(len(train_labels))
+    print 'size of Train_labels'+str(Train_label_per_descriptor.shape)
+    print 'size of visual words'+str(visual_words.shape)        
+    # Train a linear SVM classifier 
+    clf, stdSlr = train_SVM(visual_words,train_labels)
     
     # Calculate accuracy of system
-    accuracy = evaluate_test(test_images_filenames, test_labels, codebook, stdSlr, detector, clf)
+    accuracy = evaluate_test(test_images_filenames, test_labels, codebook, stdSlr, detector, clf, apply_pca, pca)
     print 'Final accuracy: ' + str(accuracy)
     
     end=time.time()
     print 'Done in '+str(end-start)+' secs.'
-    
     out = 'Accuracy:'+str(accuracy)+' k: '+str(k)+'. \n' 
-    fo = open('accuracies_41.txt' ,'a')
+    fo = open('accuracies_4pca.txt' ,'a')
     fo.write(out)
     fo.close()
     
     return
-
 
 #----------------------------------------------------#    
 #------------------ Main function ------------------ #
@@ -247,11 +279,12 @@ def core(k):
 if __name__ == "__main__":
 
     # Define array of k sizes
-    cbook_size_k = np.arange(64,2000,64)
-
+    cbook_size_k = np.array([512,1024])
+    # Create  pca object
+    pca = PCA(n_components =100)
     # Compute core 
     for i in range(len(cbook_size_k)):
-	print '\nComputing core: cbook_size = '+str(cbook_size_k[i])+', iteration = '+str(i)  
-	core(cbook_size_k[i]) 
+        print '\nComputing core: cbook_size = '+str(cbook_size_k[i])+', iteration = '+str(i)  
+        core(cbook_size_k[i],pca) 
         
     print 'Overall finished'
